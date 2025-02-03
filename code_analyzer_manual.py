@@ -73,12 +73,10 @@ def get_ai_analysis(code_content, filename):
                 continue
             return f"AI分析失败 (已重试{max_retries}次): {str(e)}"
 
-def analyze_code_files(root_dir, output_file, retry_failed_only=False):
-    """分析代码文件并生成说明文档"""
+def analyze_code_files(file_paths, output_file, retry_failed_only=False):
+    """分析指定的代码文件并生成说明文档"""
     
-    print("开始扫描Python文件...")
-    py_files = list(Path(root_dir).rglob('*.py'))
-    print(f"找到 {len(py_files)} 个Python文件")
+    print(f"准备分析 {len(file_paths)} 个文件...")
     
     # 创建或读取失败文件列表
     failed_files_path = 'failed_files.txt'
@@ -89,14 +87,12 @@ def analyze_code_files(root_dir, output_file, retry_failed_only=False):
         if os.path.exists(failed_files_path):
             with open(failed_files_path, 'r', encoding='utf-8') as f:
                 failed_files = set(line.strip() for line in f.readlines())
-            py_files = [p for p in py_files if str(p.relative_to(root_dir)) in failed_files]
-            print(f"重试模式：将处理 {len(py_files)} 个之前失败的文件")
+            file_paths = [p for p in file_paths if str(p) in failed_files]
+            print(f"重试模式：将处理 {len(file_paths)} 个之前失败的文件")
     
     if not retry_failed_only:
-        # 检查输出文件是否存在
         if not os.path.exists(output_file):
             print("创建新的输出文件...")
-            # 如果文件不存在，才写入文档头部
             with open(output_file, 'w', encoding='utf-8') as f:
                 f.write('# 代码文件功能说明文档\n\n')
         else:
@@ -105,9 +101,9 @@ def analyze_code_files(root_dir, output_file, retry_failed_only=False):
     # 用于记录本次运行失败的文件
     current_failed_files = set()
     
-    for path in tqdm(py_files, desc="分析进度"):
-        relative_path = path.relative_to(root_dir)
-        print(f"\n开始处理文件: {relative_path}")
+    for path in tqdm(file_paths, desc="分析进度"):
+        path = Path(path)
+        print(f"\n开始处理文件: {path}")
         
         try:
             print("  正在读取文件内容...")
@@ -115,13 +111,12 @@ def analyze_code_files(root_dir, output_file, retry_failed_only=False):
                 content = code_file.read()
             
             print("  开始AI分析...")
-            ai_analysis = get_ai_analysis(content, relative_path)
+            ai_analysis = get_ai_analysis(content, path)
             
             print("  写入分析结果...")
-            # 以追加模式打开文件写入当前分析结果
             with open(output_file, 'a', encoding='utf-8') as f:
-                f.write(f'## {relative_path}\n\n')
-                f.write(f'文件路径: `{relative_path}`\n\n')
+                f.write(f'## {path}\n\n')
+                f.write(f'文件路径: `{path}`\n\n')
                 f.write('### AI分析说明\n\n')
                 # 移除 think 标签及其内容
                 cleaned_analysis = ai_analysis
@@ -131,7 +126,7 @@ def analyze_code_files(root_dir, output_file, retry_failed_only=False):
                     cleaned_analysis = ai_analysis[:start_idx] + ai_analysis[end_idx:]
                 f.write(f'{cleaned_analysis}\n\n')
                 f.write('---\n\n')
-                f.flush()  # 确保内容立即写入磁盘
+                f.flush()
             
             print("  分析结果已保存")
             print("  等待2秒后继续下一个文件...")
@@ -139,10 +134,9 @@ def analyze_code_files(root_dir, output_file, retry_failed_only=False):
             
         except Exception as e:
             print(f"  处理文件时出错: {str(e)}")
-            current_failed_files.add(str(relative_path))
-            # 错误信息也以追加模式写入
+            current_failed_files.add(str(path))
             with open(output_file, 'a', encoding='utf-8') as f:
-                f.write(f'## {relative_path} (处理出错)\n\n')
+                f.write(f'## {path} (处理出错)\n\n')
                 f.write(f'处理文件时出错: {str(e)}\n\n---\n\n')
                 f.flush()
             continue
@@ -157,13 +151,32 @@ def analyze_code_files(root_dir, output_file, retry_failed_only=False):
         print(f"失败文件列表已保存到: {failed_files_path}")
 
 if __name__ == '__main__':
-    # 获取项目根目录：优先使用命令行参数，否则使用当前目录
-    project_root = sys.argv[1] if len(sys.argv) > 1 else '.'  # 默认使用当前目录
-    output_path = 'code_documentation.md'
+    # 可以直接在这里指定要分析的文件列表
+    files_to_analyze = [
+        # 在这里添加要分析的文件路径，例如：
+        # "path/to/your/file1.py",
+        # "path/to/your/file2.py",
+        "generate_tree.py",
+    ]
     
-    # 添加重试模式参数
+    # 如果命令行提供了参数，则使用命令行参数
+    if len(sys.argv) > 1:
+        file_paths = [arg for arg in sys.argv[1:] if not arg.startswith('--')]
+    else:
+        file_paths = files_to_analyze
+        
+    if not file_paths:
+        print("请提供要分析的文件路径")
+        print("方法1: 直接在代码中的 files_to_analyze 列表中添加文件路径")
+        print("方法2: 通过命令行参数指定: python code_analyzer_manual.py <file_path1> [file_path2 ...]")
+        sys.exit(1)
+    
+    output_path = 'code_documentation.md'
     retry_mode = '--retry' in sys.argv
     
-    print(f'正在分析项目目录: {os.path.abspath(project_root)}')
-    analyze_code_files(project_root, output_path, retry_failed_only=retry_mode)
+    print(f'准备分析以下文件:')
+    for path in file_paths:
+        print(f'  - {os.path.abspath(path)}')
+    
+    analyze_code_files(file_paths, output_path, retry_failed_only=retry_mode)
     print(f'文档已生成: {output_path}') 
